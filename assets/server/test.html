@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Babylon.js App</title>
+
+  <style>
+    html,
+    body {
+      overflow: hidden;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+    }
+
+    #renderCanvas {
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+    }
+  </style>
+  <script src="umd/jsonrepair.js"></script>
+
+</head>
+
+<body>
+
+  <script>
+         const { jsonrepair } = JSONRepair
+       function myFunc(jsonString) {
+      const result = jsonrepair(jsonString)
+      return result;
+    }
+myFunc(json)
+  </script>
+  <button type="button" onclick='myFunc("{\"name\":\"John\"}")'>Click Me!</button>
+
+</body>
+
+</html>

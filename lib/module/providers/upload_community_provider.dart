@@ -1,119 +1,264 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 import 'package:archive/archive.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import '../models/addon_model.dart';
+import 'package:path_provider/path_provider.dart';
 
 class UploadCommunityProvider with ChangeNotifier {
-  UploadCommunityProvider() {
-    pickAndUnzipAddon();
-  }
+  UploadCommunityProvider();
 
-  List<AddonModels> listAddonExtracted = <AddonModels>[];
+  List<PlatformFile> filesPicked = [];
+
   ValueNotifier<bool> isLoading = ValueNotifier(false);
-  ValueNotifier<bool> isUpdate = ValueNotifier(false);
-
-  Future<Map> repairJSData(Uint8List fileData) async {
-    var errorJson = utf8.decode(fileData);
-    // var repoData = js.context.callMethod('myFunc', [errorJson]);
-    return jsonDecode(errorJson);
-  }
 
   List<GetDataAddonModel> listBlockBP = []; //lay data tu cai nay
   List<GetDataAddonModel> listEntityRP = []; //hoac lay data tu cai nay
   List<GetDataAddonModel> listModelRP = [];
   List<GetDataAddonModel> listTextureRP = [];
   late ArchiveFile terrainTextureData = ArchiveFile("", 0, "");
+  late ArchiveFile blockJsonRP = ArchiveFile("", 0, "");
 
-  _resetListDataDefault() {
-    listAddonExtracted.clear();
-    terrainTextureData.clear();
-    listBlockBP.clear();
-    listModelRP.clear();
-    listTextureRP.clear();
+  String nameParentFolder = "data_exported";
+
+  List<ErrorAddonModel> errorFileName = [];
+
+  Future<void> pickAddon() async {
+    FilePickerResult? pickerResult = await FilePicker.platform.pickFiles(allowMultiple: true);
+    if (pickerResult != null) {
+      filesPicked = pickerResult.files;
+    }
+    notifyListeners();
   }
 
-  pickAndUnzipAddon() async {
-    _resetListDataDefault();
-    var dataPicked = await rootBundle.load("assets/Blossomcitpack.zip");
-    Archive archive = Archive();
+  _clearData() {
+    listBlockBP.clear();
+    listEntityRP.clear();
+    listModelRP.clear();
+    listTextureRP.clear();
+    errorFileName.clear();
+    terrainTextureData = ArchiveFile("", 0, "");
+    blockJsonRP = ArchiveFile("", 0, "");
+  }
 
-    archive = ZipDecoder().decodeBytes(dataPicked.buffer.asUint8List());
+  Future<void> extractAddon() async {
+    _clearData();
+    isLoading.value = true;
+    await Future.delayed(const Duration(milliseconds: 50));
+    var nameTime = DateTime.now().millisecondsSinceEpoch;
+    await _handleExtractData();
+    await _handleDataEntity(nameTime);
+    await _handleDataBlock(nameTime);
+    isLoading.value = false;
+    notifyListeners();
+  }
 
-    //lay behavior va resource path
-    String resource = '';
-    String behavior = '';
-    var manifestRepo = await _getManifestAddon(archive, behavior, resource);
-    resource = manifestRepo["resource"];
-    behavior = manifestRepo["behavior"];
+  Future<void> _handleExtractData() async {
+    for (var filePicked in filesPicked) {
+      try {
+        Archive archive = Archive();
+        final bytes = File(filePicked.path ?? "").readAsBytesSync();
+        archive = ZipDecoder().decodeBytes(bytes);
+        String resource = '';
+        String behavior = '';
+        var manifestRepo = await _getManifestAddon(archive, behavior, resource);
+        resource = manifestRepo["resource"];
+        behavior = manifestRepo["behavior"];
 
-    // for (final file in archive) {
-    //   if (file.name.contains("$resource/models")) {
-    //     if (file.isFile) {
-    //       listModelRP.add(GetDataAddonModel(
-    //         name: "",
-    //         data: file,
-    //       ));
-    //     }
-    //   }
-    // }
-
-    //get block data
-    for (final file in archive) {
-      if (file.name.contains("$behavior/blocks")) {
-        if (file.isFile) {
-          //get name file
-          String blockName = "";
-          var repo = await repairJSData(file.content);
-          blockName = repo['minecraft:block']['description']['identifier'];
-          listBlockBP.add(GetDataAddonModel(
-            name: blockName,
-            data: file,
-          ));
+        if (resource.isEmpty || behavior.isEmpty) {
+          errorFileName.add(ErrorAddonModel(name: filePicked.name, data: "-- Lỗi zip"));
         }
-      }
-    }
 
-    //get model
-    for (final file in archive) {
-      if (file.name.contains("$resource/models")) {
-        if (file.isFile) {
-          //get name file
-          String modelName = "";
-          var repo = await repairJSData(file.content);
-          //case binh thuong ton tai key minecraft:geometry va mot key id nam o key
-          if (repo.containsKey("minecraft:geometry")) {
-            modelName = repo["minecraft:geometry"][0]["description"]["identifier"];
+        print("-----------------------");
+
+        // get block data
+        for (final file in archive) {
+          if (file.name.contains("$behavior/blocks")) {
+            if (file.isFile) {
+              //get name file
+              String blockName = "";
+              var repo = await repairJSData(file.content);
+              blockName = repo['minecraft:block']['description']['identifier'];
+              listBlockBP.add(GetDataAddonModel(
+                name: blockName,
+                data: file,
+              ));
+            }
           }
-          listModelRP.add(GetDataAddonModel(
-            name: modelName,
-            data: file,
-          ));
+        }
+
+        //get model
+        for (final file in archive) {
+          if (file.name.contains("$resource/models")) {
+            if (file.isFile) {
+              //get name file
+              String modelName = "";
+              var repo = await repairJSData(file.content);
+              //case binh thuong ton tai key minecraft:geometry va mot key id nam o key
+              if (repo.containsKey("minecraft:geometry")) {
+                modelName = repo["minecraft:geometry"][0]["description"]["identifier"];
+              }
+              listModelRP.add(GetDataAddonModel(
+                name: modelName,
+                data: file,
+              ));
+            }
+          }
+        }
+
+        //get entity resource
+        for (final file in archive) {
+          if (file.name.contains("$resource/entity")) {
+            if (file.isFile) {
+              //get name file
+              String modelName = "";
+              var repo = await repairJSData(file.content);
+              //case binh thuong ton tai key minecraft:geometry va mot key id nam o key
+              if (repo.containsKey("minecraft:client_entity")) {
+                modelName = repo["minecraft:client_entity"]["description"]["identifier"];
+              }
+              listEntityRP.add(GetDataAddonModel(
+                name: modelName,
+                data: file,
+              ));
+            }
+          }
+        }
+
+        //get texture
+        for (final file in archive) {
+          if (file.name.contains("$resource/textures")) {
+            if (file.isFile && !file.name.contains(".json")) {
+              listTextureRP.add(GetDataAddonModel(
+                name: file.name,
+                data: file,
+              ));
+            }
+          }
+        }
+
+        //get terrain texture
+        for (final file in archive) {
+          if (file.name.contains("$resource/textures/terrain_texture.json")) {
+            terrainTextureData = file;
+          }
+        }
+        //get block json rp
+        for (final file in archive) {
+          if (file.name.contains("$resource/blocks.json")) {
+            blockJsonRP = file;
+          }
+        }
+      } catch (e) {
+        errorFileName.add(ErrorAddonModel(name: filePicked.name, data: "-- Lỗi tách addon"));
+      }
+    }
+  }
+
+  Future<void> _handleDataBlock(int nameTime) async {
+    for (var element in listBlockBP) {
+      String pathFolderParentName = "${nameParentFolder}_$nameTime/blocks";
+      print("\n-------------------start-------------------\n");
+      var addonName = _formatString(element.name ?? "");
+      var jsonDataBlock = await repairJSData(element.data?.content);
+
+      //get model resource pack
+      var model3DName = jsonDataBlock['minecraft:block']['components']['minecraft:geometry'];
+      for (var element in listModelRP) {
+        if (element.name == model3DName) {
+          var jsonElement = await repairJSData(element.data?.content);
+          writeFile(
+            "$pathFolderParentName/$addonName/${element.name!.split(":").last}.json",
+            const JsonEncoder.withIndent("  ").convert(jsonElement),
+          );
         }
       }
-    }
 
-    //get texture
-    for (final file in archive) {
-      if (file.name.contains("$resource/textures")) {
-        if (file.isFile && !file.name.contains(".json")) {
-          listTextureRP.add(GetDataAddonModel(
-            name: file.name,
-            data: file,
-          ));
+      //get texture by block
+      var getTextureNameBlock = jsonDataBlock['minecraft:block']['components']['minecraft:material_instances']['*']['texture'];
+
+      var getTerrainTextureData = json.decode(utf8.decode(terrainTextureData.content));
+      if (getTerrainTextureData.toString().contains(getTextureNameBlock)) {
+        var data = getTerrainTextureData['texture_data'][getTextureNameBlock]['textures'].first;
+        var ttContext = listTextureRP.firstWhere((element) => element.name!.contains("$data.png")).data!.content;
+        writeImage(
+          "$pathFolderParentName/$addonName/${element.name!.split(":").last}.png",
+          ttContext,
+        );
+      }
+    }
+  }
+
+  Future<void> _handleDataEntity(int nameTime) async {
+    for (var element in listEntityRP) {
+      String pathFolderParentName = "${nameParentFolder}_$nameTime/entity";
+      var entityData = jsonDecode(utf8.decode(element.data?.content));
+      var addonName = _formatString(element.name ?? "");
+      // get model
+      var model3DName = entityData['minecraft:client_entity']['description']['geometry']['default'];
+      for (var element in listModelRP) {
+        if (element.name == model3DName) {
+          var jsonElement = await repairJSData(element.data?.content);
+          writeFile(
+            "$pathFolderParentName/$addonName/${element.name!.split(":").last}.json",
+            const JsonEncoder.withIndent("  ").convert(jsonElement),
+          );
         }
       }
-    }
 
-    //get terrain texture
-    for (final file in archive) {
-      if (file.name.contains("$resource/textures/terrain_texture.json")) {
-        terrainTextureData = file;
+      var data = entityData['minecraft:client_entity']['description']['textures'].values.first;
+      var ttContext = listTextureRP.firstWhere((element) => element.name!.contains("$data.png")).data!.content;
+      writeImage(
+        "$pathFolderParentName/$addonName/${element.name!.split(":").last}.png",
+        ttContext,
+      );
+    }
+  }
+
+  String _formatString(String input) {
+    String cleanedString = input.replaceAll(RegExp(r'[^a-zA-Z0-9]'), ' ');
+    List<String> words = cleanedString.split(RegExp(r'\s+'));
+    String formattedString = words.map((word) {
+      if (word.isNotEmpty) {
+        return word[0].toUpperCase() + word.substring(1).toLowerCase();
+      } else {
+        return '';
       }
-    }
+    }).join(' ');
+    return formattedString;
+  }
 
-    _handleDataBlockFurniture(archive);
+  Future<void> writeFile(String filePath, String content) async {
+    Directory directory = await getApplicationDocumentsDirectory();
+    String fullPath = '${directory.path}/$filePath';
+    String folderPath = Directory(fullPath).parent.path;
+    Directory folder = Directory(folderPath);
+    if (!await folder.exists()) {
+      await folder.create(recursive: true);
+    }
+    File file = File(fullPath);
+    await file.writeAsString(content);
+  }
+
+  Future<void> writeImage(String filePath, Uint8List content) async {
+    Directory directory = await getApplicationDocumentsDirectory();
+    String fullPath = '${directory.path}/$filePath';
+    String folderPath = Directory(fullPath).parent.path;
+    Directory folder = Directory(folderPath);
+    if (!await folder.exists()) {
+      await folder.create(recursive: true);
+    }
+    File file = File(fullPath);
+    await file.writeAsBytes(content);
+  }
+
+  Future<Map> repairJSData(Uint8List fileData) async {
+    var errorJson = utf8.decode(fileData);
+    // var repoData = js.context.callMethod('myFunc', [errorJson]);
+    return jsonDecode(errorJson);
   }
 
   Future<Map> _getManifestAddon(Archive archive, String behavior, String resource) async {
@@ -131,42 +276,6 @@ class UploadCommunityProvider with ChangeNotifier {
     }
     return {"behavior": behavior, "resource": resource};
   }
-
-  _handleDataBlockFurniture(Archive archive) async {
-    for (var element in listBlockBP) {
-      print("\n-------------------start-------------------\n");
-      AddonModels defaultData = AddonModels.defaultData();
-      var jsonDataBlock = await repairJSData(element.data?.content);
-
-      defaultData.addonName = jsonDataBlock['minecraft:block']['description']['identifier'];
-
-      ///handle model behavior pack
-      //get name model by block
-      var getModelNameBlock = jsonDataBlock['minecraft:block']['components']['minecraft:geometry'];
-      //set data
-      defaultData.modelsRP = repairJSData(listModelRP.where((modelData) => modelData.name == getModelNameBlock).first.data?.content).toString();
-
-      ///handle texture behavior pack
-      //get name texture by block
-      var getTextureNameBlock = jsonDataBlock['minecraft:block']['components']['minecraft:material_instances']['*']['texture'];
-      //get terrain texture
-      var jsonDataTerrainTexture = await repairJSData(terrainTextureData.content);
-      List<String> listTextureName = jsonDataTerrainTexture['texture_data'].keys.toList();
-
-      //get path texture
-      var pathTexture = "";
-      if (listTextureName.where((textureNameItem) => textureNameItem == getTextureNameBlock).first == getTextureNameBlock) {
-        pathTexture = jsonDataTerrainTexture['texture_data'][getTextureNameBlock]['textures'].first;
-      }
-
-      //get texture
-      defaultData.textureRP = listTextureRP.where((textureItem) => textureItem.name?.contains("$pathTexture.png") ?? false).first.data?.content;
-
-      //set data
-      listAddonExtracted.add(defaultData);
-      notifyListeners();
-    }
-  }
 }
 
 class GetDataAddonModel {
@@ -174,4 +283,18 @@ class GetDataAddonModel {
   ArchiveFile? data;
 
   GetDataAddonModel({this.name, this.data});
+}
+
+class SetDataAddonModel {
+  String? name;
+  String? data;
+
+  SetDataAddonModel({this.name, this.data});
+}
+
+class ErrorAddonModel {
+  String? name;
+  String? data;
+
+  ErrorAddonModel({this.name, this.data});
 }

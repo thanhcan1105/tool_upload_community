@@ -3,6 +3,7 @@ import 'package:tool_upload_community/app_provider_register.dart';
 import 'package:tool_upload_community/module/screen/main_screen.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const MyApp());
 }
 

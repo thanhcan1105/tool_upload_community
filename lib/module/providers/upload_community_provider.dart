@@ -22,7 +22,7 @@ class UploadCommunityProvider with ChangeNotifier {
   late ArchiveFile terrainTextureData = ArchiveFile("", 0, "");
   late ArchiveFile blockJsonRP = ArchiveFile("", 0, "");
 
-  String nameParentFolder = "data_exported";
+  String folderPathExtracted = "";
 
   List<ErrorAddonModel> errorFileName = [];
 
@@ -46,12 +46,14 @@ class UploadCommunityProvider with ChangeNotifier {
 
   Future<void> extractAddon() async {
     _clearData();
+    Directory directory = await getApplicationDocumentsDirectory();
+    folderPathExtracted = "${directory.path}/data_exported_${DateTime.now().millisecondsSinceEpoch}";
     isLoading.value = true;
     await Future.delayed(const Duration(milliseconds: 50));
     var nameTime = DateTime.now().millisecondsSinceEpoch;
     await _handleExtractData();
-    await _handleDataEntity(nameTime);
-    await _handleDataBlock(nameTime);
+    await _handleDataEntity();
+    await _handleDataBlock();
     isLoading.value = false;
     notifyListeners();
   }
@@ -74,6 +76,7 @@ class UploadCommunityProvider with ChangeNotifier {
 
         print("-----------------------");
 
+        print(behavior);
         // get block data
         for (final file in archive) {
           if (file.name.contains("$behavior/blocks")) {
@@ -158,63 +161,87 @@ class UploadCommunityProvider with ChangeNotifier {
     }
   }
 
-  Future<void> _handleDataBlock(int nameTime) async {
+  Future<void> _handleDataBlock() async {
     for (var element in listBlockBP) {
-      String pathFolderParentName = "${nameParentFolder}_$nameTime/blocks";
-      print("\n-------------------start-------------------\n");
-      var addonName = _formatString(element.name ?? "");
-      var jsonDataBlock = await repairJSData(element.data?.content);
+      try {
+        String pathFolderParentName = "$folderPathExtracted/blocks";
+        print("\n-------------------start-------------------\n");
+        var addonName = _formatString(element.name ?? "");
+        String dataModel = "";
+        Uint8List dataTexture = Uint8List(0);
+        var jsonDataBlock = await repairJSData(element.data?.content);
 
-      //get model resource pack
-      var model3DName = jsonDataBlock['minecraft:block']['components']['minecraft:geometry'];
-      for (var element in listModelRP) {
-        if (element.name == model3DName) {
-          var jsonElement = await repairJSData(element.data?.content);
+        //get model resource pack
+        var model3DName = jsonDataBlock['minecraft:block']['components']['minecraft:geometry'];
+        for (var element in listModelRP) {
+          if (element.name == model3DName) {
+            var jsonElement = await repairJSData(element.data?.content);
+            dataModel = const JsonEncoder.withIndent("  ").convert(jsonElement);
+          }
+        }
+
+        //get texture by block
+        var getTextureNameBlock = jsonDataBlock['minecraft:block']['components']['minecraft:material_instances']['*']['texture'];
+
+        var getTerrainTextureData = json.decode(utf8.decode(terrainTextureData.content));
+        if (getTerrainTextureData.toString().contains(getTextureNameBlock)) {
+          var data = getTerrainTextureData['texture_data'][getTextureNameBlock]['textures'].first;
+          var ttContext = listTextureRP.firstWhere((element) => element.name!.contains("$data.png")).data!.content;
+          dataTexture = ttContext;
+        }
+
+        if (dataTexture.isNotEmpty || dataModel.isNotEmpty) {
+          writeImage(
+            "$pathFolderParentName/$addonName/${element.name!.split(":").last}.png",
+            dataTexture,
+          );
+
           writeFile(
             "$pathFolderParentName/$addonName/${element.name!.split(":").last}.json",
-            const JsonEncoder.withIndent("  ").convert(jsonElement),
+            dataModel,
           );
         }
-      }
-
-      //get texture by block
-      var getTextureNameBlock = jsonDataBlock['minecraft:block']['components']['minecraft:material_instances']['*']['texture'];
-
-      var getTerrainTextureData = json.decode(utf8.decode(terrainTextureData.content));
-      if (getTerrainTextureData.toString().contains(getTextureNameBlock)) {
-        var data = getTerrainTextureData['texture_data'][getTextureNameBlock]['textures'].first;
-        var ttContext = listTextureRP.firstWhere((element) => element.name!.contains("$data.png")).data!.content;
-        writeImage(
-          "$pathFolderParentName/$addonName/${element.name!.split(":").last}.png",
-          ttContext,
+      } catch (e) {
+        errorFileName.add(
+          ErrorAddonModel(
+            name: e.toString(),
+          ),
         );
       }
     }
   }
 
-  Future<void> _handleDataEntity(int nameTime) async {
+  Future<void> _handleDataEntity() async {
     for (var element in listEntityRP) {
-      String pathFolderParentName = "${nameParentFolder}_$nameTime/entity";
-      var entityData = jsonDecode(utf8.decode(element.data?.content));
-      var addonName = _formatString(element.name ?? "");
-      // get model
-      var model3DName = entityData['minecraft:client_entity']['description']['geometry']['default'];
-      for (var element in listModelRP) {
-        if (element.name == model3DName) {
-          var jsonElement = await repairJSData(element.data?.content);
-          writeFile(
-            "$pathFolderParentName/$addonName/${element.name!.split(":").last}.json",
-            const JsonEncoder.withIndent("  ").convert(jsonElement),
-          );
+      try {
+        String pathFolderParentName = "$folderPathExtracted/entity";
+        var entityData = jsonDecode(utf8.decode(element.data?.content));
+        var addonName = _formatString(element.name ?? "");
+        // get model
+        var model3DName = entityData['minecraft:client_entity']['description']['geometry']['default'];
+        for (var element in listModelRP) {
+          if (element.name == model3DName) {
+            var jsonElement = await repairJSData(element.data?.content);
+            writeFile(
+              "$pathFolderParentName/$addonName/${element.name!.split(":").last}.json",
+              const JsonEncoder.withIndent("  ").convert(jsonElement),
+            );
+          }
         }
-      }
 
-      var data = entityData['minecraft:client_entity']['description']['textures'].values.first;
-      var ttContext = listTextureRP.firstWhere((element) => element.name!.contains("$data.png")).data!.content;
-      writeImage(
-        "$pathFolderParentName/$addonName/${element.name!.split(":").last}.png",
-        ttContext,
-      );
+        var data = entityData['minecraft:client_entity']['description']['textures'].values.first;
+        var ttContext = listTextureRP.firstWhere((element) => element.name!.contains("$data.png")).data!.content;
+        writeImage(
+          "$pathFolderParentName/$addonName/${element.name!.split(":").last}.png",
+          ttContext,
+        );
+      } catch (e) {
+        errorFileName.add(
+          ErrorAddonModel(
+            name: e.toString(),
+          ),
+        );
+      }
     }
   }
 
@@ -232,26 +259,22 @@ class UploadCommunityProvider with ChangeNotifier {
   }
 
   Future<void> writeFile(String filePath, String content) async {
-    Directory directory = await getApplicationDocumentsDirectory();
-    String fullPath = '${directory.path}/$filePath';
-    String folderPath = Directory(fullPath).parent.path;
+    String folderPath = Directory(filePath).parent.path;
     Directory folder = Directory(folderPath);
     if (!await folder.exists()) {
       await folder.create(recursive: true);
     }
-    File file = File(fullPath);
+    File file = File(filePath);
     await file.writeAsString(content);
   }
 
   Future<void> writeImage(String filePath, Uint8List content) async {
-    Directory directory = await getApplicationDocumentsDirectory();
-    String fullPath = '${directory.path}/$filePath';
-    String folderPath = Directory(fullPath).parent.path;
+    String folderPath = Directory(filePath).parent.path;
     Directory folder = Directory(folderPath);
     if (!await folder.exists()) {
       await folder.create(recursive: true);
     }
-    File file = File(fullPath);
+    File file = File(filePath);
     await file.writeAsBytes(content);
   }
 

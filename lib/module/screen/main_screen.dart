@@ -3,12 +3,14 @@ import 'dart:async';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/widgets.dart';
-import 'package:lottie/lottie.dart';
 import 'package:provider/provider.dart';
 import 'package:tool_upload_community/module/component/const.dart';
 import 'package:tool_upload_community/module/component/custom_appbar.dart';
 import 'package:tool_upload_community/module/component/custom_background.dart';
 import 'package:tool_upload_community/module/providers/upload_community_provider.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import '../component/text_default.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -34,7 +36,6 @@ class _MainScreenState extends State<MainScreen> {
     this.context = context;
     var provider = Provider.of<UploadCommunityProvider>(context, listen: false);
     var watchProvider = context.watch<UploadCommunityProvider>();
-    var size = MediaQuery.of(context).size;
     return CustomBackground(
       appBar: const CustomAppBar(
         title: "Công cụ tách Addon",
@@ -109,48 +110,7 @@ class _MainScreenState extends State<MainScreen> {
                     GestureDetector(
                       onTap: () async {
                         await provider.extractAddon();
-                        if (watchProvider.errorFileName.isNotEmpty) {
-                          showDialog(
-                            context: context,
-                            builder: (context) {
-                              return AlertDialog(
-                                backgroundColor: Colors.black.withOpacity(.8),
-                                title: const Text(
-                                  "Something went wrong:",
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                  ),
-                                ),
-                                content: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    ...watchProvider.errorFileName.map(
-                                      (e) => Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(e.name ?? ""),
-                                          Text("  ${e.data}"),
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Text("-" * 40),
-                                    const Text("Ôi không, những addon trên đã gặp sự cố.\nLiên hệ CầnCần để được xử lý."),
-                                  ],
-                                ),
-                              );
-                            },
-                          ).then(
-                            (value) => ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  "Đã xử lý xong :D",
-                                ),
-                              ),
-                            ),
-                          );
-                        }
+                        _buildDialogFinish(watchProvider);
                       },
                       child: Container(
                         height: 50,
@@ -221,6 +181,131 @@ class _MainScreenState extends State<MainScreen> {
               })
         ],
       ),
+    );
+  }
+
+  Future<void> _buildDialogError(watchProvider) async {
+    return await showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: Colors.black.withOpacity(.8),
+          title: const Text(
+            "Something went wrong:",
+            style: TextStyle(
+              color: Colors.white,
+            ),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ...watchProvider.errorFileName.map(
+                  (e) => Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(e.name ?? ""),
+                      Text("  ${e.data}"),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text("-" * 40),
+                const Text("Ôi không, những addon trên đã gặp sự cố.\nLiên hệ CầnCần để được xử lý."),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _buildDialogFinish(UploadCommunityProvider watchProvider) async {
+    return await showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: Colors.black.withOpacity(.8),
+          title: const Text(
+            "Success:",
+            style: TextStyle(
+              color: Colors.white,
+            ),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset(
+                  "assets/animations/done_ani.gif",
+                  height: 150,
+                ),
+                Text("Em đã xử lý xong.\nFile được lưu tại ${watchProvider.folderPathExtracted}"),
+                const Divider(),
+                if (watchProvider.errorFileName.isNotEmpty)
+                  SizedBox(
+                    width: double.infinity,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          "Có một số lỗi cần xem lại: ",
+                          style: textStyleDefault.copyWith(
+                            color: Colors.red,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        ...watchProvider.errorFileName.map(
+                          (e) => Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text("- ${e.name}"),
+                              Text("  ${e.data}"),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        const Divider(),
+                        const Text("Liên hệ CầnCần để được xử lý."),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            MaterialButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              child: Text(
+                "OK",
+                style: textStyleDefault,
+              ),
+            ),
+            MaterialButton(
+              onPressed: () async {
+                final Uri uri = Uri.file(watchProvider.folderPathExtracted);
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri);
+                } else {
+                  final snackBar = SnackBar(
+                    content: Text('Không thể mở thư mục: ${watchProvider.folderPathExtracted}!!'),
+                    duration: const Duration(seconds: 2),
+                  );
+                  ScaffoldMessenger.of(context).showSnackBar(snackBar);
+                }
+              },
+              child: Text(
+                "Đi tới file",
+                style: textStyleDefault,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

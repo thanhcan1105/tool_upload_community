@@ -1,15 +1,19 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 class UploadCommunityProvider with ChangeNotifier {
-  UploadCommunityProvider();
+  UploadCommunityProvider() {
+    // _handleExtractData();
+  }
 
   List<PlatformFile> filesPicked = [];
 
@@ -47,10 +51,12 @@ class UploadCommunityProvider with ChangeNotifier {
   Future<void> extractAddon() async {
     _clearData();
     Directory directory = await getApplicationDocumentsDirectory();
-    folderPathExtracted = "${directory.path}/data_exported_${DateTime.now().millisecondsSinceEpoch}";
+    var now = DateTime.now();
+    String nameTime = "${now.year}-${now.month}-${now.day}_${now.hour}-${now.minute}";
+    folderPathExtracted = "${directory.path}/data_exported_$nameTime";
+    Directory(folderPathExtracted).create(recursive: true);
     isLoading.value = true;
     await Future.delayed(const Duration(milliseconds: 50));
-    var nameTime = DateTime.now().millisecondsSinceEpoch;
     await _handleExtractData();
     await _handleDataEntity();
     await _handleDataBlock();
@@ -61,9 +67,20 @@ class UploadCommunityProvider with ChangeNotifier {
   Future<void> _handleExtractData() async {
     for (var filePicked in filesPicked) {
       try {
-        Archive archive = Archive();
+        Archive archiveRaw = Archive();
         final bytes = File(filePicked.path ?? "").readAsBytesSync();
-        archive = ZipDecoder().decodeBytes(bytes);
+        archiveRaw = ZipDecoder().decodeBytes(bytes);
+        Archive archive = Archive();
+
+        for (final file in archiveRaw) {
+          if (file.name.contains(".json")) {
+            archive.addFile(file);
+          }
+          if (file.name.contains(".png")) {
+            archive.addFile(file);
+          }
+        }
+
         String resource = '';
         String behavior = '';
         var manifestRepo = await _getManifestAddon(archive, behavior, resource);
@@ -76,7 +93,6 @@ class UploadCommunityProvider with ChangeNotifier {
 
         print("-----------------------");
 
-        print(behavior);
         // get block data
         for (final file in archive) {
           if (file.name.contains("$behavior/blocks")) {
@@ -165,7 +181,7 @@ class UploadCommunityProvider with ChangeNotifier {
     for (var element in listBlockBP) {
       try {
         String pathFolderParentName = "$folderPathExtracted/blocks";
-        print("\n-------------------start-------------------\n");
+        print("\n-------------------behavior start-------------------\n");
         var addonName = _formatString(element.name ?? "");
         String dataModel = "";
         Uint8List dataTexture = Uint8List(0);
@@ -189,7 +205,6 @@ class UploadCommunityProvider with ChangeNotifier {
           var ttContext = listTextureRP.firstWhere((element) => element.name!.contains("$data.png")).data!.content;
           dataTexture = ttContext;
         }
-
         if (dataTexture.isNotEmpty || dataModel.isNotEmpty) {
           writeImage(
             "$pathFolderParentName/$addonName/${element.name!.split(":").last}.png",
@@ -214,27 +229,46 @@ class UploadCommunityProvider with ChangeNotifier {
   Future<void> _handleDataEntity() async {
     for (var element in listEntityRP) {
       try {
+        print("\n------------------resource start-------------------\n");
         String pathFolderParentName = "$folderPathExtracted/entity";
         var entityData = jsonDecode(utf8.decode(element.data?.content));
         var addonName = _formatString(element.name ?? "");
+
+        String dataModel = "";
+        List<String> animationsData = [];
+        Uint8List dataTexture = Uint8List(0);
+
+        //get animation RP
+        var animationsRPName = entityData['minecraft:client_entity']['description']['animations'];
+
+        //get animations controllers RP
+        var animationControllersRPName = entityData['minecraft:client_entity']['description']['animation_controllers'];
+        print(animationsRPName.runtimeType);
+
         // get model
         var model3DName = entityData['minecraft:client_entity']['description']['geometry']['default'];
         for (var element in listModelRP) {
           if (element.name == model3DName) {
             var jsonElement = await repairJSData(element.data?.content);
-            writeFile(
-              "$pathFolderParentName/$addonName/${element.name!.split(":").last}.json",
-              const JsonEncoder.withIndent("  ").convert(jsonElement),
-            );
+            dataModel = const JsonEncoder.withIndent("  ").convert(jsonElement);
           }
         }
 
         var data = entityData['minecraft:client_entity']['description']['textures'].values.first;
         var ttContext = listTextureRP.firstWhere((element) => element.name!.contains("$data.png")).data!.content;
-        writeImage(
-          "$pathFolderParentName/$addonName/${element.name!.split(":").last}.png",
-          ttContext,
-        );
+        dataTexture = ttContext;
+
+        if (dataTexture.isNotEmpty || dataModel.isNotEmpty) {
+          writeImage(
+            "$pathFolderParentName/$addonName/${element.name!.split(":").last}.png",
+            dataTexture,
+          );
+
+          writeFile(
+            "$pathFolderParentName/$addonName/${element.name!.split(":").last}.json",
+            dataModel,
+          );
+        }
       } catch (e) {
         errorFileName.add(
           ErrorAddonModel(
@@ -281,7 +315,11 @@ class UploadCommunityProvider with ChangeNotifier {
   Future<Map> repairJSData(Uint8List fileData) async {
     var errorJson = utf8.decode(fileData);
     // var repoData = js.context.callMethod('myFunc', [errorJson]);
-    return jsonDecode(errorJson);
+    String jsonWithoutComments = errorJson
+        .split('\n') // Tách từng dòng
+        .where((line) => !line.trim().startsWith('//')) // Bỏ dòng bắt đầu bằng "//"
+        .join('\n'); // Gộp lại thành chuỗi
+    return jsonDecode(jsonWithoutComments);
   }
 
   Future<Map> _getManifestAddon(Archive archive, String behavior, String resource) async {
